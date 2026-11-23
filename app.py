@@ -485,6 +485,7 @@ CHECKLISTS = {
     "before start": [
         ("PARKING BRAKE", "SET / RELEASED"),
         ("T.O SPEEDS & THRUST", "(BOTH)"),
+        ("WINDOWS", "CLOSED(BOTH)")
         ("BEACON", "ON"),
     ],
     "after start": [
