@@ -309,7 +309,7 @@ telemetria = {
     "fuel_tons": 0.0,
 }
 
-s
+
 def monitorar_simulador():
   while True:
     try:
