@@ -227,7 +227,7 @@ def executar_checklist_automaticamente(nome):
   inicio_audio = time.monotonic()
   tocar_audio(nome_arquivo_audio)
 
-  for i, item in enumerate(itens, start=1):
+  for i, (item, resposta) in enumerate(itens, start=1):
     if not estado_checklist["ativa"]:
       break
 
@@ -239,15 +239,17 @@ def executar_checklist_automaticamente(nome):
     if not estado_checklist["ativa"]:
       break
 
-    item_exibicao = item
-    if item == "Fuel quantity" and telemetria.get("fuel_tons", 0) > 0:
-      item_exibicao = f"Fuel quantity ({telemetria['fuel_tons']} tons)"
+    resposta_final = resposta
+    if item.upper() == "FUEL QUANTITY" and telemetria.get("fuel_tons", 0) > 0:
+      resposta_final = f"{telemetria['fuel_tons']} TONS"
 
     lbl_progresso_status.config(
-        text=f"[{i}/{total_itens}] {nome.upper()} ➔ {item_exibicao} [CHECK]",
+        text=f"[{i}/{total_itens}] {nome.upper()} ➔ {item} [{resposta_final}]",
         fg="#00e676",
     )
-    atualizar_gui_logs(f"   ✓ {item_exibicao}\n", "#a8dadc")
+    atualizar_gui_logs(
+        f"   ✓ {item.ljust(24, '.')} {resposta_final}\n", "#a8dadc"
+    )
 
     progress_bar["value"] = i
     root.update_idletasks()
@@ -307,7 +309,7 @@ telemetria = {
     "fuel_tons": 0.0,
 }
 
-
+s
 def monitorar_simulador():
   while True:
     try:
@@ -376,29 +378,56 @@ def executar_logica_automatica():
 # ==========================================
 CHECKLISTS = {
     "cockpit preparation": [
-        "Removed",
-        "Fuel quantity",
-        "Seat belts",
-        "Nav",
-        "Baro ref",
+        ("GEAR PINS and COVERS", "REMOVED"),
+        ("FUEL QUANTITY", "(KG/LB)"),
+        ("SEAT BELTS", "ON"),
+        ("ADIRS", "NAV"),
+        ("BARO REF", "SET (BOTH)"),
     ],
     "before start": [
-        "Parking brake",
-        "Windows",
-        "Beacon",
-        "Pitch trim",
-        "Rudder trim",
+        ("PARKING BRAKE", "SET / RELEASED"),
+        ("WINDOWS", "CLOSED (BOTH)"),
+        ("BEACON", "ON"),
+        ("PITCH TRIM", "SET (%)"),
+        ("RUDDER TRIM", "NEUTRAL"),
     ],
-    "after start": ["Anti ice", "Ecam status", "Spoilers", "Flaps"],
+    "after start": [
+        ("ANTI ICE", "OFF / AS RQRD"),
+        ("ECAM STATUS", "CHECKED"),
+        ("SPOILERS", "ARMED"),
+        ("FLAPS", "SET"),
+    ],
     "taxi": [
-        "Radar and predictive windshear",
-        "Engine mode selector",
-        "Ecam memo",
+        ("RADAR & PRED W/S", "ON & AUTO"),
+        ("ENG MODE SEL", "NORM / IGN"),
+        ("ECAM MEMO", "TO NO BLUE"),
     ],
-    "line-up": ["Takeoff runway", "Engine mode selector", "Landing lights"],
-    "approach": ["X bleed", "Ecam memo ldg", "Baro ref", "Minima"],
-    "after landing": ["Radar and windshear", "Wings light", "Flight controls"],
-    "parking": ["Engines", "Parking brake", "Fuel pumps", "Beacons"],
+    "line-up": [
+        ("T.O. RWY", "CONFIRMED (BOTH)"),
+        ("ENG MODE SEL", "AS RQRD"),
+        ("LANDING LIGHTS", "ON"),
+    ],
+    "approach": [
+        ("X BLEED", "AUTO"),
+        ("ECAM MEMO", "LDG NO BLUE"),
+        ("BARO REF", "SET (BOTH)"),
+        ("MINIMUM", "SET"),
+    ],
+    "landing": [
+        ("ECAM MEMO", "LDG NO BLUE"),
+        ("CABIN", "READY"),
+    ],
+    "after landing": [
+        ("RADAR & PRED W/S", "OFF"),
+        ("WINGS LIGHT", "OFF"),
+        ("FLIGHT CONTROLS", "CHECKED"),
+    ],
+    "parking": [
+        ("ENGINES", "OFF"),
+        ("PARK BRK or CHOCKS", "SET"),
+        ("FUEL PUMPS", "OFF"),
+        ("BEACON", "OFF"),
+    ],
 }
 
 
@@ -573,12 +602,29 @@ COR_ECAM_VERMELHO = "#ff5252"
 style = ttk.Style()
 style.theme_use("clam")
 style.configure(
-    "TCombobox",
-    fieldbackground="#1e293b",
-    background="#1e293b",
-    foreground="#f1f5f9",
-    bordercolor="#334155",
+    "ECAM.TCombobox",
+    fieldbackground="#161b22",
+    background="#21262d",
+    foreground="#00e5ff",
+    arrowcolor="#00e5ff",
+    bordercolor="#30363d",
+    lightcolor="#161b22",
+    darkcolor="#161b22",
 )
+
+style.map(
+  "ECAM.TCombobox",
+    fieldbackground=[("readonly", "#161b22"), ("disabled", "#0d1117")],
+    foreground=[("readonly", "#00e5ff"), ("disabled", "#484f58")],
+    selectbackground=[("readonly", "#161b22")],
+    selectforeground=[("readonly", "#00e5ff")],  
+)
+
+root.option_add("*TCombobox*Listbox.background", "#161b22")
+root.option_add("*TCombobox*Listbox.foreground", "#e6edf3")
+root.option_add("*TCombobox*Listbox.selectBackground", "#00e5ff")
+root.option_add("*TCombobox*Listbox.selectForeground", "#0d1117")
+
 style.configure(
     "Airbus.Horizontal.TProgressbar",
     troughcolor="#1e293b",
@@ -884,7 +930,7 @@ progress_bar.pack(fill="x", padx=10, pady=(4, 10))
 # --- TERMINAL DE COMUNICAÇÃO INTEGRADO ---
 frame_terminal = tk.LabelFrame(
     root,
-    text=" COCKPIT COMM LOG ",
+    text=" COCKPIT COM LOG ",
     bg=COR_CARD,
     fg=COR_SUBTEXTO,
     font=("Consolas", 9, "bold"),
