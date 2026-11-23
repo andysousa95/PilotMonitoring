@@ -7,8 +7,14 @@ import threading
 import time
 import tkinter as tk
 from tkinter import scrolledtext, ttk, messagebox
+from SimConnect import AircraftEvents, AircraftRequests, SimConnect
 import numpy as np
 import sounddevice as sd
+
+#VARIÁVEIS GLOBAIS#
+sm = None
+aq = None
+ae = None
 
 if "DISPLAY" not in os.environ:
   os.environ["DISPLAY"] = ":0"
@@ -100,6 +106,97 @@ config_volumes = {
     "output_device": None,
     "mic_mutado": False,
 }
+
+DIGITOS = {
+    "zero": 0,
+    "oh": 0,
+    "one": 1,
+    "two": 2,
+    "to": 2,
+    "too": 2,
+    "three": 3,
+    "tree": 3,
+    "four": 4,
+    "for": 4,
+    "five": 5,
+    "fife": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "niner": 9,
+}
+
+# FUNÇÃO PARA EXECUTAR COMANDOS DE HEADING & ALTITUDE#
+
+def extrair_numero_fcu(texto):
+  """Extrai qualquer número falado ('278', 'two seven eight', 'five thousand')."""
+  limpo = re.sub(r"[^\w\s]", "", texto.lower())
+
+  # Caso 1: Dígitos diretos ("278", "5000", "350")
+  junto = re.sub(r"(?<=\d)\s+(?=\d)", "", limpo)
+  match = re.search(r"\d+", junto)
+  if match:
+    return int(match.group())
+
+  # Caso 2: Por extenso com milhar ("five thousand", "twelve thousand five hundred")
+  palavras = limpo.split()
+  if "thousand" in palavras:
+    idx = palavras.index("thousand")
+    milhar = DIGITOS.get(palavras[idx - 1], 0) if idx > 0 else 0
+    centena = (
+        DIGITOS.get(palavras[idx + 1], 0) * 100
+        if idx + 1 < len(palavras) and palavras[idx + 1] in DIGITOS
+        else 0
+    )
+    if milhar > 0:
+      return (milhar * 1000) + centena
+
+  # Caso 3: Dígito a dígito por extenso ("zero four five" -> 45, "three four zero" -> 340)
+  sequencia = "".join(str(DIGITOS[p]) for p in palavras if p in DIGITOS)
+  return int(sequencia) if sequencia else None
+
+
+def setar_heading(hdg):
+  if not (0 <= hdg <= 360):
+    atualizar_gui_logs(
+        f"⚠️ Heading inválido: {hdg} (use 000 a 360)\n", "#ff5252"
+    )
+    return
+
+  hdg_formatado = f"{hdg:03d}"
+  try:
+    if ae:
+      evento_hdg = ae.find("HEADING_BUG_SET")
+      evento_hdg(hdg)
+    atualizar_gui_logs(
+        f"✈️ Copiloto: Heading {hdg_formatado} set.\n", "#00e5ff"
+    )
+  except Exception as e:
+    atualizar_gui_logs(f"❌ Erro SimConnect (HDG): {e}\n", "#ff5252")
+
+
+def setar_altitude_ou_fl(valor, eh_fl=True):
+  if eh_fl:
+    if not (1 <= valor <= 450):
+      atualizar_gui_logs(f"⚠️ Flight Level inválido: FL{valor}\n", "#ff5252")
+      return
+    altitude_pes = valor * 100
+    label = f"FL{valor:03d} ({altitude_pes} ft)"
+  else:
+    if not (100 <= valor <= 45000):
+      atualizar_gui_logs(f"⚠️ Altitude inválida: {valor} ft\n", "#ff5252")
+      return
+    altitude_pes = valor
+    label = f"{altitude_pes} ft"
+
+  try:
+    if ae:
+      evento_alt = ae.find("AP_ALT_VAR_SET_ENGLISH")
+      evento_alt(altitude_pes)
+    atualizar_gui_logs(f"✈️ Copiloto: Altitude {label} set.\n", "#00e5ff")
+  except Exception as e:
+    atualizar_gui_logs(f"❌ Erro SimConnect (ALT): {e}\n", "#ff5252")
 
 
 # ==========================================
@@ -311,6 +408,7 @@ telemetria = {
 
 
 def monitorar_simulador():
+  global sm, aq, ae
   while True:
     try:
       sm = SimConnect()
@@ -386,32 +484,33 @@ CHECKLISTS = {
     ],
     "before start": [
         ("PARKING BRAKE", "SET / RELEASED"),
-        ("WINDOWS", "CLOSED (BOTH)"),
+        ("T.O SPEEDS & THRUST", "(BOTH)"),
         ("BEACON", "ON"),
-        ("PITCH TRIM", "SET (%)"),
-        ("RUDDER TRIM", "NEUTRAL"),
     ],
     "after start": [
         ("ANTI ICE", "OFF / AS RQRD"),
         ("ECAM STATUS", "CHECKED"),
-        ("SPOILERS", "ARMED"),
-        ("FLAPS", "SET"),
+        ("PITCH TRIM", "___%"),
     ],
     "taxi": [
-        ("RADAR & PRED W/S", "ON & AUTO"),
-        ("ENG MODE SEL", "NORM / IGN"),
+        ("FLIGHT CONTROLS", "CHECKED (BOTH)"),
+        ("FLAPS SETTINGS", "CONF___(BOTH)"),
+        ("RADAR & PRED W/SH", "ON & AUTO"),
+        ("ENG MODE SEL", "___"),
         ("ECAM MEMO", "TO NO BLUE"),
+        ("CABIN", "READY")
     ],
     "line-up": [
         ("T.O. RWY", "CONFIRMED (BOTH)"),
-        ("ENG MODE SEL", "AS RQRD"),
-        ("LANDING LIGHTS", "ON"),
+        ("TCAS", "___"),
+        ("PACKS 1 & 2", "___"),
     ],
     "approach": [
-        ("X BLEED", "AUTO"),
-        ("ECAM MEMO", "LDG NO BLUE"),
         ("BARO REF", "SET (BOTH)"),
-        ("MINIMUM", "SET"),
+        ("SEAT BELTS", "ON"),
+        ("MINIMUM", "___"),
+        ("AUTO BREAK", "___"),
+        ("ENG MODE SEL", "AS RQRD"),
     ],
     "landing": [
         ("ECAM MEMO", "LDG NO BLUE"),
@@ -419,14 +518,13 @@ CHECKLISTS = {
     ],
     "after landing": [
         ("RADAR & PRED W/S", "OFF"),
-        ("WINGS LIGHT", "OFF"),
-        ("FLIGHT CONTROLS", "CHECKED"),
     ],
     "parking": [
-        ("ENGINES", "OFF"),
         ("PARK BRK or CHOCKS", "SET"),
+        ("ENGINES", "OFF"),
+        ("WINGS LIGHT", "OFF"),
         ("FUEL PUMPS", "OFF"),
-        ("BEACON", "OFF"),
+        ("YELLOW ELEC PUMP", "OFF"),
     ],
 }
 
@@ -439,6 +537,26 @@ def tratar_comando_voz(texto):
 
   atualizar_gui_logs(f"🎙️ Comandante: {texto_limpo}\n", "#f1f5f9")
 
+  # --- COMANDOS FCU (HEADING / FLIGHT LEVEL / ALTITUDE) ---
+  if "heading" in texto_limpo:
+    hdg = extrair_numero_fcu(texto_limpo)
+    if hdg is not None:
+      setar_heading(hdg)
+      return
+
+  if "flight level" in texto_limpo or re.search(r"\bfl\b", texto_limpo):
+    fl = extrair_numero_fcu(texto_limpo)
+    if fl is not None:
+      setar_altitude_ou_fl(fl, eh_fl=True)
+      return
+
+  if "altitude" in texto_limpo:
+    alt = extrair_numero_fcu(texto_limpo)
+    if alt is not None:
+      setar_altitude_ou_fl(alt, eh_fl=(alt < 500))
+      return
+
+  # --- COMANDOS DE OPERAÇÃO & CHECKLISTS ---
   if "push and start" in texto_limpo or "push start" in texto_limpo:
     log_e_falar("Push and start authorized.")
   elif (
@@ -468,9 +586,9 @@ def tratar_comando_voz(texto):
   elif "approach" in texto_limpo and "checklist" in texto_limpo:
     iniciar_checklist("approach")
   elif (
-    "landing" in texto_limpo
-    and "after" not in texto_limpo
-    and "checklist" in texto_limpo
+      "landing" in texto_limpo
+      and "after" not in texto_limpo
+      and "checklist" in texto_limpo
   ):
     iniciar_checklist("landing")
   elif "after landing" in texto_limpo and "checklist" in texto_limpo:
@@ -742,7 +860,7 @@ tk.Label(
     font=("Consolas", 9),
 ).grid(row=0, column=0, sticky="w", padx=10, pady=5)
 combo_mic = ttk.Combobox(
-    frame_audio, values=mic_names, state="readonly", font=("Segoe UI", 9)
+    frame_audio, values=mic_names, state="readonly", font=("Segoe UI", 9), style="ECAM.TCombobox"
 )
 if mic_names:
   combo_mic.current(0)
@@ -758,7 +876,7 @@ tk.Label(
     font=("Consolas", 9),
 ).grid(row=1, column=0, sticky="w", padx=10, pady=5)
 combo_out = ttk.Combobox(
-    frame_audio, values=out_names, state="readonly", font=("Segoe UI", 9)
+    frame_audio, values=out_names, state="readonly", font=("Segoe UI", 9), style="ECAM.TCombobox",
 )
 if out_names:
   combo_out.current(0)
