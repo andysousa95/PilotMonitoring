@@ -5,6 +5,7 @@ import struct
 import sys
 import threading
 import time
+import pyttsx3
 import tkinter as tk
 from tkinter import scrolledtext, ttk, messagebox
 from SimConnect import AircraftEvents, AircraftRequests, SimConnect
@@ -91,7 +92,7 @@ AVIATION_PROMPT = (
 )
 
 audio_queue = queue.Queue()
-estado_checklist = {"ativa": False, "checklist_nome": None}
+estado_checklist = {"ativa": False, "checklist_nome": None, "indice_atual": 0, "aguardando_resposta": False}
 estado_voo = {
     "thrust_set_disparado": False,
     "anunciou_100knots": False,
@@ -199,9 +200,9 @@ def setar_altitude_ou_fl(valor, eh_fl=True):
     atualizar_gui_logs(f"❌ Erro SimConnect (ALT): {e}\n", "#ff5252")
 
 
-# ==========================================
+
 # REPRODUÇÃO DE ÁUDIO & CHECKLIST AUTOMÁTICA
-# ==========================================
+
 def ler_wav_pcm(caminho_arquivo):
   with open(caminho_arquivo, "rb") as f:
     data = f.read()
@@ -286,6 +287,24 @@ def log_e_falar(texto_log, arquivo_audio=None):
   atualizar_gui_logs(f"👨‍✈️ Copiloto: {texto_log}\n", "#00e5ff")
   if arquivo_audio:
     tocar_audio(arquivo_audio)
+
+
+def falar_tts(texto):
+  def _falar():
+    try:
+      engine = pyttsx3.init()
+      engine.setProperty("rate", 175)
+      engine.setProperty("volume", min(1.0, config_volumes["app_volume"]))
+      for voz in engine.getProperty("voices"):
+        if "en-US" in voz.id or "en_US" in voz.id or "English" in voz.name:
+          engine.setProperty("voice", voz.id)
+          break
+      engine.say(texto)
+      engine.runAndWait()
+    except Exception as e:
+      atualizar_gui_logs(f"⚠️ Erro TTS: {e}\n", "#ffab00")
+
+  threading.Thread(target=_falar, daemon=True).start()
 
 
 def parar_checklist():
