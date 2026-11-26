@@ -3,3 +3,4 @@ numpy
 sounddevice
 SimConnect
 pyautogui
+pyttsx3
