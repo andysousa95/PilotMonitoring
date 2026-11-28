@@ -31,7 +31,7 @@ jobs:
 
       - name: Empacotar executável com PyInstaller
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name "PilotMonitoring_A320neo" `
+          python -m PyInstaller --noconfirm --onefile --windowed --name "PilotMonitoring_A320neo" `
             --add-data "whisper-model;whisper-model" `
             --add-data "audio;audio" `
             --add-data "piper-voice;piper-voice" `
