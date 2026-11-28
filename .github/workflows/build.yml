@@ -13,27 +13,38 @@ jobs:
       - name: Checkout do repositório
         uses: actions/checkout@v4
 
-      - name: Configurar Python 3.10
+      - name: Configurar Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
 
-      - name: Baixar modelo Faster-Whisper (base.en)
+      - name: Baixar modelo de voz Piper TTS (en_GB-alan-medium)
         run: |
-          python -c "from faster_whisper import download_model; download_model('base.en', output_dir='whisper-model')"
+          New-Item -ItemType Directory -Force -Path piper-voice
+          curl.exe -L "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium.onnx" -o "piper-voice/en_GB-alan-medium.onnx"
+          curl.exe -L "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium.onnx.json" -o "piper-voice/en_GB-alan-medium.onnx.json"
 
-      - name: Gerar Executável Standalone (Sem Console)
+      - name: Empacotar executável com PyInstaller
         run: |
-          pyinstaller --noconfirm --onefile --windowed --name "PilotMonitoring" --collect-all SimConnect --collect-all faster_whisper --add-data "whisper-model;whisper-model" --add-data "audio;audio" app.py
+          pyinstaller --noconfirm --onefile --windowed --name "PilotMonitoring_A320neo" `
+            --add-data "whisper-model;whisper-model" `
+            --add-data "audio;audio" `
+            --add-data "piper-voice;piper-voice" `
+            --collect-all faster_whisper `
+            --collect-all piper `
+            --collect-all onnxruntime `
+            --collect-all SimConnect `
+            --hidden-import "sounddevice" `
+            --hidden-import "pyautogui" `
+            app.py
 
-      - name: Upload do Artefato (.exe)
+      - name: Publicar artefato do executável
         uses: actions/upload-artifact@v4
         with:
-          name: PilotMonitoring-Windows
-          path: dist/PilotMonitoring.exe
+          name: PilotMonitoring-A320neo-Windows
+          path: dist/PilotMonitoring_A320neo.exe

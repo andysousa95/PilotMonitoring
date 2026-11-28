@@ -9,6 +9,7 @@ import pyttsx3
 import tkinter as tk
 from tkinter import scrolledtext, ttk, messagebox
 from SimConnect import AircraftEvents, AircraftRequests, SimConnect
+from piper.voice import PiperVoice
 import numpy as np
 import sounddevice as sd
 
@@ -56,10 +57,19 @@ if getattr(sys, "frozen", False):
       if os.path.exists(os.path.join(meipass_path, "audio"))
       else os.path.join(exe_dir, "audio")
   )
+
+  PIPER_DIR = (
+    os.path.join(meipass_path, "piper-voice")
+    if os.path.exists(os.path.join(meipass_path, "piper-voice"))
+    else os.path.join(exe_dir, "piper-voice")
+  )
 else:
   base_path = os.path.dirname(os.path.abspath(__file__))
   WHISPER_DIR = os.path.join(base_path, "whisper-model")
   AUDIO_PATH = os.path.join(base_path, "audio")
+
+
+
 
 # Localiza a pasta real onde o model.bin foi extraído
 caminho_modelo_real = WHISPER_DIR
@@ -83,6 +93,20 @@ except Exception as e:
       f"Não foi possível carregar o modelo:\n{e}\n\nCaminho: {caminho_modelo_real}",
   )
   sys.exit(1)
+
+#bloco Piper
+
+piper_voice = None
+try:
+  from piper.voice import PiperVoice
+
+  if os.path.exists(PIPER_DIR):
+    for f in os.listdir(PIPER_DIR):
+      if f.endswith(".onnx"):
+        piper_voice = PiperVoice.load(os.path.join(PIPER_DIR, f))
+        break
+except Exception as e:
+  print(f"Aviso: Piper TTS não carregado ({e})")
 
 AVIATION_PROMPT = (
     "Airbus A320 cockpit preparation checklist, before start checklist, after"

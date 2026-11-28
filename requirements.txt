@@ -4,3 +4,4 @@ sounddevice
 SimConnect
 pyautogui
 pyttsx3
+piper-tts
