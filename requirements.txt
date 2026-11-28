@@ -1,7 +1,7 @@
 faster-whisper
+piper-tts
 numpy
 sounddevice
 SimConnect
 pyautogui
-pyttsx3
-piper-tts
+pyinstaller
