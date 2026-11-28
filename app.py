@@ -5,11 +5,9 @@ import struct
 import sys
 import threading
 import time
-import pyttsx3
 import tkinter as tk
 from tkinter import scrolledtext, ttk, messagebox
 from SimConnect import AircraftEvents, AircraftRequests, SimConnect
-from piper.voice import PiperVoice
 import numpy as np
 import sounddevice as sd
 
@@ -67,6 +65,7 @@ else:
   base_path = os.path.dirname(os.path.abspath(__file__))
   WHISPER_DIR = os.path.join(base_path, "whisper-model")
   AUDIO_PATH = os.path.join(base_path, "audio")
+  PIPER_DIR = os.path.join(base_path, "piper-voice")
 
 
 
@@ -194,9 +193,7 @@ def setar_heading(hdg):
     if ae:
       evento_hdg = ae.find("HEADING_BUG_SET")
       evento_hdg(hdg)
-    atualizar_gui_logs(
-        f"✈️ Copiloto: Heading {hdg_formatado} set.\n", "#00e5ff"
-    )
+    log_e_falar(f"Heading {hdg_formatado} set.")
   except Exception as e:
     atualizar_gui_logs(f"❌ Erro SimConnect (HDG): {e}\n", "#ff5252")
 
@@ -207,22 +204,21 @@ def setar_altitude_ou_fl(valor, eh_fl=True):
       atualizar_gui_logs(f"⚠️ Flight Level inválido: FL{valor}\n", "#ff5252")
       return
     altitude_pes = valor * 100
-    label = f"FL{valor:03d} ({altitude_pes} ft)"
+    texto_fala = f"Flight level {valor:03d} set."
   else:
     if not (100 <= valor <= 45000):
       atualizar_gui_logs(f"⚠️ Altitude inválida: {valor} ft\n", "#ff5252")
       return
     altitude_pes = valor
-    label = f"{altitude_pes} ft"
+    texto_fala = f"Altitude {altitude_pes} feet set."
 
   try:
     if ae:
       evento_alt = ae.find("AP_ALT_VAR_SET_ENGLISH")
       evento_alt(altitude_pes)
-    atualizar_gui_logs(f"✈️ Copiloto: Altitude {label} set.\n", "#00e5ff")
+    log_e_falar(texto_fala)
   except Exception as e:
     atualizar_gui_logs(f"❌ Erro SimConnect (ALT): {e}\n", "#ff5252")
-
 
 
 # REPRODUÇÃO DE ÁUDIO & CHECKLIST AUTOMÁTICA
@@ -306,30 +302,68 @@ def tocar_audio(nome_arquivo):
 
   threading.Thread(target=_play, daemon=True).start()
 
+NOMES_DIGITOS = {
+    "0": "zero",
+    "1": "one",
+    "2": "two",
+    "3": "three",
+    "4": "four",
+    "5": "five",
+    "6": "six",
+    "7": "seven",
+    "8": "eight",
+    "9": "niner",
+}
 
-def log_e_falar(texto_log, arquivo_audio=None):
-  atualizar_gui_logs(f"👨‍✈️ Copiloto: {texto_log}\n", "#00e5ff")
-  if arquivo_audio:
-    tocar_audio(arquivo_audio)
+def numero_para_fraseologia(texto):
+  """Converte números em fraseologia aeronáutica ('Heading 278' -> 'Heading two seven eight')."""
+
+  def _substituir(match):
+    num_str = match.group(0)
+    valor = int(num_str)
+    if valor >= 1000 and valor % 100 == 0:
+      milhar = valor // 1000
+      centena = (valor % 1000) // 100
+      parte_mil = " ".join(NOMES_DIGITOS[d] for d in str(milhar)) + " thousand"
+      if centena > 0:
+        return f"{parte_mil} {NOMES_DIGITOS[str(centena)]} hundred"
+      return parte_mil
+    return " ".join(NOMES_DIGITOS[d] for d in num_str)
+
+  return re.sub(r"\b\d+\b", _substituir, texto)
 
 
-def falar_tts(texto):
+def falar_tts_piper(texto):
+  if piper_voice is None:
+    return
+
   def _falar():
     try:
-      engine = pyttsx3.init()
-      engine.setProperty("rate", 175)
-      engine.setProperty("volume", min(1.0, config_volumes["app_volume"]))
-      for voz in engine.getProperty("voices"):
-        if "en-US" in voz.id or "en_US" in voz.id or "English" in voz.name:
-          engine.setProperty("voice", voz.id)
-          break
-      engine.say(texto)
-      engine.runAndWait()
+      texto_voz = numero_para_fraseologia(texto)
+      chunks = []
+      for audio_chunk in piper_voice.synthesize(texto_voz):
+        chunks.append(audio_chunk.audio_float_array)
+      if chunks:
+        audio_data = np.concatenate(chunks) * config_volumes["app_volume"]
+        out_dev = config_volumes["output_device"]
+        sd.play(
+            audio_data, samplerate=piper_voice.config.sample_rate, device=out_dev
+        )
+        sd.wait()
     except Exception as e:
-      atualizar_gui_logs(f"⚠️ Erro TTS: {e}\n", "#ffab00")
+      atualizar_gui_logs(f"⚠️ Erro Piper TTS: {e}\n", "#ffab00")
 
   threading.Thread(target=_falar, daemon=True).start()
 
+
+def log_e_falar(texto_log, arquivo_audio=None):
+  atualizar_gui_logs(f"👨‍✈️ Copiloto: {texto_log}\n", "#00e5ff")
+  if arquivo_audio and os.path.exists(
+      os.path.join(AUDIO_PATH, f"{arquivo_audio}.wav")
+  ):
+    tocar_audio(arquivo_audio)
+  else:
+    falar_tts_piper(texto_log)
 
 def parar_checklist():
   global estado_checklist
@@ -456,6 +490,7 @@ def monitorar_simulador():
     try:
       sm = SimConnect()
       aq = AircraftRequests(sm)
+      ae = AircraftEvents(sm)
       atualizar_status_sim(True)
       while True:
         telemetria["altitude"] = aq.get("PLANE_ALTITUDE") or 0
@@ -1144,8 +1179,8 @@ def atualizar_status_sim(conectado):
 
 if __name__ == "__main__":
   atualizar_gui_logs(
-      "System initialized. Ready for flight operations.\n", COR_ECAM_CIANO
+      "🟢 Sistema inicializado. Aguardando comandos de voz...\n", "#00e676"
   )
-  threading.Thread(target=loop_escuta, daemon=True).start()
   threading.Thread(target=monitorar_simulador, daemon=True).start()
+  threading.Thread(target=loop_escuta, daemon=True).start()
   root.mainloop()
