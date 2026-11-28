@@ -24,6 +24,14 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
+      - name: Baixar modelo Faster-Whisper (base.en)
+        run: |
+          New-Item -ItemType Directory -Force -Path whisper-model
+          curl.exe -L "https://huggingface.co/Systran/faster-whisper-base.en/resolve/main/config.json" -o "whisper-model/config.json"
+          curl.exe -L "https://huggingface.co/Systran/faster-whisper-base.en/resolve/main/model.bin" -o "whisper-model/model.bin"
+          curl.exe -L "https://huggingface.co/Systran/faster-whisper-base.en/resolve/main/tokenizer.json" -o "whisper-model/tokenizer.json"
+          curl.exe -L "https://huggingface.co/Systran/faster-whisper-base.en/resolve/main/vocabulary.txt" -o "whisper-model/vocabulary.txt"
+
       - name: Baixar modelo de voz Piper TTS (en_GB-alan-medium)
         run: |
           New-Item -ItemType Directory -Force -Path piper-voice
