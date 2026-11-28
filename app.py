@@ -333,16 +333,20 @@ def numero_para_fraseologia(texto):
   return re.sub(r"\b\d+\b", _substituir, texto)
 
 
-def falar_tts_piper(texto):
+audio_lock = threading.Lock()
+
+
+def falar_tts_piper_sincrono(texto):
+  """Fala via Piper TTS aguardando terminar (evita sobreposição de áudios)."""
   if piper_voice is None:
     return
-
-  def _falar():
+  with audio_lock:
     try:
       texto_voz = numero_para_fraseologia(texto)
-      chunks = []
-      for audio_chunk in piper_voice.synthesize(texto_voz):
-        chunks.append(audio_chunk.audio_float_array)
+      chunks = [
+          chunk.audio_float_array
+          for chunk in piper_voice.synthesize(texto_voz)
+      ]
       if chunks:
         audio_data = np.concatenate(chunks) * config_volumes["app_volume"]
         out_dev = config_volumes["output_device"]
@@ -353,7 +357,49 @@ def falar_tts_piper(texto):
     except Exception as e:
       atualizar_gui_logs(f"⚠️ Erro Piper TTS: {e}\n", "#ffab00")
 
-  threading.Thread(target=_falar, daemon=True).start()
+
+def falar_tts_piper(texto):
+  threading.Thread(
+      target=falar_tts_piper_sincrono, args=(texto,), daemon=True
+  ).start()
+
+
+def tocar_audio_sincrono(nome_arquivo):
+  """Toca um .wav aguardando terminar."""
+  caminho_arquivo = os.path.join(AUDIO_PATH, f"{nome_arquivo}.wav")
+  if not os.path.exists(caminho_arquivo):
+    atualizar_gui_logs(
+        f"⚠️ Áudio não encontrado: {nome_arquivo}.wav\n", "#ffab00"
+    )
+    return False
+  with audio_lock:
+    try:
+      samples, sr, _ = ler_wav_pcm(caminho_arquivo)
+      if samples is not None:
+        audio_ajustado = samples * config_volumes["app_volume"]
+        out_dev = config_volumes["output_device"]
+        sd.play(audio_ajustado, samplerate=sr, device=out_dev)
+        sd.wait()
+        return True
+    except Exception as e:
+      atualizar_gui_logs(f"⚠️ Erro ao reproduzir áudio: {e}\n", "#ff5252")
+  return False
+
+
+def tocar_audio(nome_arquivo):
+  threading.Thread(
+      target=tocar_audio_sincrono, args=(nome_arquivo,), daemon=True
+  ).start()
+
+
+def log_e_falar(texto_log, arquivo_audio=None):
+  atualizar_gui_logs(f"👨‍✈️ Copiloto: {texto_log}\n", "#00e5ff")
+  if arquivo_audio and os.path.exists(
+      os.path.join(AUDIO_PATH, f"{arquivo_audio}.wav")
+  ):
+    tocar_audio(arquivo_audio)
+  else:
+    falar_tts_piper(texto_log)
 
 
 def log_e_falar(texto_log, arquivo_audio=None):
@@ -387,86 +433,87 @@ def executar_checklist_automaticamente(nome):
   progress_bar["value"] = 0
 
   nome_arquivo_audio = f"{nome.capitalize()} checklist"
-  duracao_total = obter_duracao_wav(nome_arquivo_audio)
+  caminho_wav = os.path.join(AUDIO_PATH, f"{nome_arquivo_audio}.wav")
+  tem_wav = os.path.exists(caminho_wav)
 
-  delay_titulo = min(2.2, duracao_total * 0.20)
-  tempo_final = min(1.5, duracao_total * 0.12)
-  tempo_util = max(1.0, duracao_total - delay_titulo - tempo_final)
-  intervalo_item = tempo_util / total_itens
-
-  lbl_progresso_status.config(
-      text=f"🔊 EXECUTANDO: {nome.upper()} ({duracao_total:.1f}s)...",
-      fg="#00e5ff",
-  )
-  inicio_audio = time.monotonic()
-  tocar_audio(nome_arquivo_audio)
-
-  for i, (item, resposta) in enumerate(itens, start=1):
-    if not estado_checklist["ativa"]:
-      break
-
-    momento_alvo = delay_titulo + ((i - 1) * intervalo_item)
-    espera = momento_alvo - (time.monotonic() - inicio_audio)
-    if espera > 0:
-      time.sleep(espera)
-
-    if not estado_checklist["ativa"]:
-      break
-
-    resposta_final = resposta
-    if item.upper() == "FUEL QUANTITY" and telemetria.get("fuel_tons", 0) > 0:
-      resposta_final = f"{telemetria['fuel_tons']} TONS"
+  if tem_wav:
+    duracao_total = obter_duracao_wav(nome_arquivo_audio)
+    delay_titulo = min(2.2, duracao_total * 0.20)
+    tempo_final = min(1.5, duracao_total * 0.12)
+    tempo_util = max(1.0, duracao_total - delay_titulo - tempo_final)
+    intervalo_item = tempo_util / total_itens
 
     lbl_progresso_status.config(
-        text=f"[{i}/{total_itens}] {nome.upper()} ➔ {item} [{resposta_final}]",
-        fg="#00e676",
+        text=f"🔊 EXECUTANDO: {nome.upper()} ({duracao_total:.1f}s)...",
+        fg="#00e5ff",
     )
-    atualizar_gui_logs(
-        f"   ✓ {item.ljust(24, '.')} {resposta_final}\n", "#a8dadc"
-    )
+    inicio_audio = time.monotonic()
+    tocar_audio(nome_arquivo_audio)
 
-    progress_bar["value"] = i
-    root.update_idletasks()
+    for i, (item, resposta) in enumerate(itens, start=1):
+      if not estado_checklist["ativa"]:
+        break
+      momento_alvo = delay_titulo + ((i - 1) * intervalo_item)
+      espera = momento_alvo - (time.monotonic() - inicio_audio)
+      if espera > 0:
+        time.sleep(espera)
+      if not estado_checklist["ativa"]:
+        break
+
+      resposta_final = (
+          f"{telemetria['fuel_tons']} TONS"
+          if item.upper() == "FUEL QUANTITY"
+          and telemetria.get("fuel_tons", 0) > 0
+          else resposta
+      )
+      lbl_progresso_status.config(
+          text=f"[{i}/{total_itens}] {nome.upper()} ➔ {item} [{resposta_final}]",
+          fg="#00e676",
+      )
+      atualizar_gui_logs(
+          f"   ✓ {item.ljust(24, '.')} {resposta_final}\n", "#a8dadc"
+      )
+      progress_bar["value"] = i
+      root.update_idletasks()
+  else:
+    # Fallback neural: lê a checklist item a item via Piper TTS
+    lbl_progresso_status.config(
+        text=f"🔊 EXECUTANDO (VOZ NEURAL): {nome.upper()}...", fg="#00e5ff"
+    )
+    falar_tts_piper_sincrono(f"{nome} checklist.")
+    for i, (item, resposta) in enumerate(itens, start=1):
+      if not estado_checklist["ativa"]:
+        break
+      resposta_final = (
+          f"{telemetria['fuel_tons']} TONS"
+          if item.upper() == "FUEL QUANTITY"
+          and telemetria.get("fuel_tons", 0) > 0
+          else resposta
+      )
+      lbl_progresso_status.config(
+          text=f"[{i}/{total_itens}] {nome.upper()} ➔ {item} [{resposta_final}]",
+          fg="#00e676",
+      )
+      atualizar_gui_logs(
+          f"   ✓ {item.ljust(24, '.')} {resposta_final}\n", "#a8dadc"
+      )
+      progress_bar["value"] = i
+      root.update_idletasks()
+      falar_tts_piper_sincrono(
+          f"{item.lower()}, {resposta_final.lower().replace('_', '')}."
+      )
 
   if estado_checklist["ativa"]:
-    restante = duracao_total - (time.monotonic() - inicio_audio)
-    if restante > 0:
-      time.sleep(restante)
-
     lbl_progresso_status.config(
         text=f"✅ {nome.upper()} CHECKLIST COMPLETED", fg="#00e676"
     )
     atualizar_gui_logs(
         f"✔️ {nome.capitalize()} checklist concluída.\n", "#00e676"
     )
-
-    time.sleep(1.5)
-    while not audio_queue.empty():
-      try:
-        audio_queue.get_nowait()
-      except queue.Empty:
-        break
-
+    if not tem_wav:
+      falar_tts_piper_sincrono(f"{nome} checklist completed.")
     estado_checklist["ativa"] = False
     estado_checklist["checklist_nome"] = None
-
-
-def iniciar_checklist(nome):
-  global estado_checklist
-  if nome not in CHECKLISTS:
-    log_e_falar(f"Checklist {nome} not found.")
-    return
-
-  if estado_checklist["ativa"]:
-    return
-
-  estado_checklist["ativa"] = True
-  estado_checklist["checklist_nome"] = nome
-
-  log_e_falar(f"Running {nome} checklist.")
-  threading.Thread(
-      target=executar_checklist_automaticamente, args=(nome,), daemon=True
-  ).start()
 
 
 # ==========================================
@@ -549,6 +596,8 @@ def executar_logica_automatica():
     estado_voo["anunciou_100knots"] = True
 
 
+
+
 # ==========================================
 # CHECKLISTS & COMANDOS DE VOZ
 # ==========================================
@@ -574,7 +623,7 @@ CHECKLISTS = {
     "taxi": [
         ("FLIGHT CONTROLS", "CHECKED (BOTH)"),
         ("FLAPS SETTINGS", "CONF___(BOTH)"),
-        ("RADAR & PRED W/SH", "ON & AUTO"),
+        ("RADAR & PRED W/S", "ON & AUTO"),
         ("ENG MODE SEL", "___"),
         ("ECAM MEMO", "TO NO BLUE"),
         ("CABIN", "READY")
